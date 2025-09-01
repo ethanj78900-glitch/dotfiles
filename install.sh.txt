@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Variables - adapt these!
+DOTFILES_REPO="https://github.com/ethanj78900-glitch/dotfiles.git"
+DOTFILES_DIR="$HOME/.dotfiles"
+BACKUP_DIR="$HOME/dotfiles_backup_$(date +%Y%m%d%H%M%S)"
+AUR_HELPER="yay"  # Change to paru or other if you prefer
+
+# Programs to install from official repos
+OFFICIAL_PKGS=(
+    i3-wm i3status i3lock
+    google-chrome
+    ranger
+    rofi
+    mousepad
+    git
+    base-devel
+    wget
+    curl
+    xorg-server
+    xorg-xinit
+    firefox  # Optional, add more popular packages here
+)
+
+# AUR Packages (if any)
+AUR_PKGS=(
+    google-chrome
+    # Add other AUR-only packages here
+)
+
+# Function: Check if running as regular user (not root)
+function check_user() {
+    if [[ "$EUID" -eq 0 ]]; then
+        echo "Please run this script as a normal user, not root."
+        exit 1
+    fi
+}
+
+# Function: Check if on Arch Linux
+function check_arch_linux() {
+    if ! grep -qi arch /etc/os-release; then
+        echo "This script only supports Arch Linux."
+        exit 1
+    fi
+}
+
+# Function: check and install package from pacman
+function install_official_packages() {
+    echo "Installing official packages..."
+    sudo pacman -Sy --needed --noconfirm "${OFFICIAL_PKGS[@]}"
+}
+
+# Function: Install AUR packages using yay
+function install_aur_packages() {
+    if ! command -v "$AUR_HELPER" &>/dev/null; then
+      echo "$AUR_HELPER not found. Installing yay..."
+      git clone https://aur.archlinux.org/yay.git /tmp/yay
+      cd /tmp/yay || exit
+      makepkg -si --noconfirm
+      cd - || exit
+      rm -rf /tmp/yay
+    fi
+    echo "Installing AUR packages..."
+    $AUR_HELPER -Sy --needed --noconfirm "${AUR_PKGS[@]}"
+}
+
+# Function: Backup existing configs
+function backup_dotfiles() {
+    echo "Backing up existing dotfiles to $BACKUP_DIR ..."
+    mkdir -p "$BACKUP_DIR"
+    for file in .bashrc .xinitrc .config/i3/config .config/rofi/config.rasi .config/ranger/; do
+        if [[ -e "$HOME/$file" ]]; then
+            mv "$HOME/$file" "$BACKUP_DIR/"
+            echo "Moved $file to backup."
+        fi
+    done
+}
+
+# Function: Clone dotfiles repo
+function clone_dotfiles() {
+    if [[ -d "$DOTFILES_DIR" ]]; then
+        echo "Dotfiles directory already exists at $DOTFILES_DIR, pulling latest changes..."
+        git -C "$DOTFILES_DIR" pull
+    else
+        echo "Cloning dotfiles repo..."
+        git clone "$DOTFILES_REPO" "$DOTFILES_DIR"
+    fi
+}
+
+# Function: Symlink dotfiles
+function link_dotfiles() {
+    echo "Linking dotfiles..."
+    ln -sf "$DOTFILES_DIR/.bashrc" "$HOME/.bashrc"
+    ln -sf "$DOTFILES_DIR/.xinitrc" "$HOME/.xinitrc"
+    mkdir -p "$HOME/.config"
+    mkdir -p "$HOME/.config/i3"
+    mkdir -p "$HOME/.config/rofi"
+    mkdir -p "$HOME/.config/ranger"
+
+    ln -sf "$DOTFILES_DIR/.config/i3/config" "$HOME/.config/i3/config"
+    ln -sf "$DOTFILES_DIR/.config/rofi/config.rasi" "$HOME/.config/rofi/config.rasi"
+    ln -sf "$DOTFILES_DIR/.config/ranger/rc.conf" "$HOME/.config/ranger/rc.conf"
+
+    echo "Dotfiles linked."
+}
+
+# Function: Enable i3wm as default session (for display manager like LightDM)
+function enable_i3_session() {
+    echo "Enabling i3 session (if display manager is used)..."
+    if command -v systemctl &>/dev/null && systemctl is-enabled lightdm &>/dev/null; then
+        echo "LightDM detected."
+        if ! grep -q "^user-session=i3" /etc/lightdm/lightdm.conf; then
+            sudo sed -i 's/^#*user-session=.*/user-session=i3/' /etc/lightdm/lightdm.conf
+            echo "Set i3 as default session in LightDM."
+        fi
+    fi
+}
+
+# MAIN
+check_user
+check_arch_linux
+
+echo "Starting personal dotfiles environment installation..."
+
+install_official_packages
+install_aur_packages
+backup_dotfiles
+clone_dotfiles
+link_dotfiles
+enable_i3_session
+
+echo "Installation complete!"
+echo "You can now start X with 'startx' or reboot to login with your desktop environment."
+
+exit 0
